@@ -6,6 +6,7 @@ tensorflow>=2.10
 torch
 transformers
 huggingface-hub
-opencv-python
+opencv-python-headless==4.10.0.84
 streamlit
 protobuf
+
