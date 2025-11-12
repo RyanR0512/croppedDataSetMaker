@@ -1,0 +1,11 @@
+numpy
+pillow
+requests
+tqdm
+tensorflow>=2.10
+torch
+transformers
+huggingface-hub
+opencv-python
+streamlit
+protobuf
