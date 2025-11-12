@@ -2,7 +2,7 @@ numpy
 pillow
 requests
 tqdm
-tensorflow>=2.10
+tf-nightly 
 torch
 transformers
 huggingface-hub
