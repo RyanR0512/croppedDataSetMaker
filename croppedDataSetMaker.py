@@ -41,7 +41,7 @@ def preprocess_image(image_path, target_size=(640, 640)):
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     resized = cv2.resize(image_rgb, target_size)
     input_data = np.expand_dims(resized / 255.0, axis=0).astype(np.float32)
-    return image, input_data
+    return image_rgb, input_data
 
 def compute_iou(box1, boxes):
     x1, y1, x2, y2 = box1
