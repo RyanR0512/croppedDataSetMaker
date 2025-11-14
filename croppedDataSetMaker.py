@@ -81,47 +81,55 @@ def non_max_suppression(detections, iou_threshold=0.5):
 # -------------------- Main Detection --------------------
 def run_detection(image_path, output_dir="dataset_crops"):
     """
-    Detect objects, crop them, and save each crop.
-    Works with YOLOv5 TFLite *NMS* exported models.
-    Output format: [x1, y1, x2, y2, score, class_id]
+    Detect objects using YOLOv5 TFLite NMS model, crop each detection, and save to a dataset folder.
+    Works safely with varying output shapes and skips invalid rows.
     """
     download_model()
 
-    # Load + preprocess image
-    image, _ = preprocess_image(image_path)
+    # Load and preprocess image
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     h, w, _ = image.shape
 
-    # Run TFLite model
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Prepare input for TFLite
+    resized = cv2.resize(image, (640, 640))
+    input_data = np.expand_dims(resized / 255.0, axis=0).astype(np.float32)
+
+    # Load TFLite interpreter
     interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
     interpreter.allocate_tensors()
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
-
-    # Use raw BGR image for cropping later
-    resized = cv2.resize(image, (640, 640))
-    input_data = np.expand_dims(resized / 255.0, axis=0).astype(np.float32)
-
     interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
 
-    # YOLOv5 NMS model returns [N, 6]
-    output_data = interpreter.get_tensor(output_details[0]['index'])[0]
+    # Get output tensor
+    output_data = interpreter.get_tensor(output_details[0]['index'])
+
+    # Flatten if 3D: (1, N, 6) -> (N, 6)
+    if len(output_data.shape) == 3:
+        output_data = output_data[0]
 
     detections_list = []
 
     for det in output_data:
-        x1, y1, x2, y2, score, class_id = det
+        # Skip invalid rows
+        if len(det) < 6:
+            continue
 
+        x1, y1, x2, y2, score, class_id = det[:6]
         if score < 0.5:
             continue
 
         class_id = int(class_id)
 
         # Convert normalized coordinates to pixel coordinates
-        x1 = int(x1 * w)
-        y1 = int(y1 * h)
-        x2 = int(x2 * w)
-        y2 = int(y2 * h)
+        x1 = max(0, int(x1 * w))
+        y1 = max(0, int(y1 * h))
+        x2 = min(w, int(x2 * w))
+        y2 = min(h, int(y2 * h))
 
         detections_list.append({
             "class_id": class_id,
@@ -130,11 +138,10 @@ def run_detection(image_path, output_dir="dataset_crops"):
             "score": float(score)
         })
 
-    # NMS is already applied in this model, so skip your custom NMS
     print(f"Detected {len(detections_list)} objects in {image_path}")
 
     # Save crops
-    os.makedirs(output_dir, exist_ok=True)
+    saved_count = 0
     for i, det in enumerate(detections_list):
         x1, y1, x2, y2 = det["bbox"]
         crop = image[y1:y2, x1:x2]
@@ -145,10 +152,7 @@ def run_detection(image_path, output_dir="dataset_crops"):
         filename = f"{os.path.splitext(os.path.basename(image_path))[0]}_{class_name}_{i}.jpg"
         save_path = os.path.join(output_dir, filename)
         Image.fromarray(crop).save(save_path, "JPEG")
+        saved_count += 1
 
-    print(f"Saved {len(detections_list)} crops to: {output_dir}")
-    return len(detections_list)
-
-
-    print(f"Saved {len(detections_list)} crops to: {output_dir}")
-    return len(detections_list)
+    print(f"Saved {saved_count} crops to: {output_dir}")
+    return saved_count
