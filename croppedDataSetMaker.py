@@ -81,36 +81,48 @@ def non_max_suppression(detections, iou_threshold=0.5):
 # -------------------- Main Detection --------------------
 def run_detection(image_path, output_dir="dataset_crops"):
     """
-    Detects objects, crops them, and saves each crop as an image
-    into a single dataset directory.
+    Detect objects, crop them, and save each crop.
+    Works with YOLOv5 TFLite *NMS* exported models.
+    Output format: [x1, y1, x2, y2, score, class_id]
     """
     download_model()
 
-    image, input_data = preprocess_image(image_path)
+    # Load + preprocess image
+    image, _ = preprocess_image(image_path)
     h, w, _ = image.shape
 
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Run YOLO inference
+    # Run TFLite model
     interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
     interpreter.allocate_tensors()
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
+
+    # Use raw BGR image for cropping later
+    resized = cv2.resize(image, (640, 640))
+    input_data = np.expand_dims(resized / 255.0, axis=0).astype(np.float32)
+
     interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
+
+    # YOLOv5 NMS model returns [N, 6]
     output_data = interpreter.get_tensor(output_details[0]['index'])[0]
 
     detections_list = []
+
     for det in output_data:
-        score = det[4]
-        if score < 0.75:
+        x1, y1, x2, y2, score, class_id = det
+
+        if score < 0.5:
             continue
-        class_id = int(det[5])
-        x_center, y_center, box_w, box_h = det[0:4]
-        x1 = int((x_center - box_w / 2) * w)
-        y1 = int((y_center - box_h / 2) * h)
-        x2 = int((x_center + box_w / 2) * w)
-        y2 = int((y_center + box_h / 2) * h)
+
+        class_id = int(class_id)
+
+        # Convert normalized coordinates to pixel coordinates
+        x1 = int(x1 * w)
+        y1 = int(y1 * h)
+        x2 = int(x2 * w)
+        y2 = int(y2 * h)
+
         detections_list.append({
             "class_id": class_id,
             "class_name": COCO_CLASSES[class_id] if class_id < len(COCO_CLASSES) else "unknown",
@@ -118,20 +130,25 @@ def run_detection(image_path, output_dir="dataset_crops"):
             "score": float(score)
         })
 
-    detections_list = non_max_suppression(detections_list, iou_threshold=0.5)
-
+    # NMS is already applied in this model, so skip your custom NMS
     print(f"Detected {len(detections_list)} objects in {image_path}")
 
     # Save crops
+    os.makedirs(output_dir, exist_ok=True)
     for i, det in enumerate(detections_list):
         x1, y1, x2, y2 = det["bbox"]
         crop = image[y1:y2, x1:x2]
         if crop.size == 0:
             continue
+
         class_name = det["class_name"]
         filename = f"{os.path.splitext(os.path.basename(image_path))[0]}_{class_name}_{i}.jpg"
         save_path = os.path.join(output_dir, filename)
         Image.fromarray(crop).save(save_path, "JPEG")
+
+    print(f"Saved {len(detections_list)} crops to: {output_dir}")
+    return len(detections_list)
+
 
     print(f"Saved {len(detections_list)} crops to: {output_dir}")
     return len(detections_list)
