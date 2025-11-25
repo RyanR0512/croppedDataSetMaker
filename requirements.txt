@@ -1,12 +1,5 @@
-numpy
-pillow
-requests
-tqdm
-tf-nightly 
-torch
-transformers
-huggingface-hub
-opencv-python-headless==4.10.0.84
 streamlit
-protobuf
-
+opencv-python-headless
+tensorflow
+numpy
+requests
