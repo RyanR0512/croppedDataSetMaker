@@ -152,8 +152,9 @@ def run_detection(img_bytes, conf_thresh=0.7, output_dataset="dataset"):
     for det in detections:
         x1, y1, x2, y2 = det["bbox"]
         crop = img_resized[max(0,y1):y2, max(0,x1):x2]
+        base = os.path.splitext(image_name)[0]
 
-        crop_name = f"crop_{det['index']}.jpg"
+        crop_name = f"{base}_{det['index']}.jpg"
         crop_path = os.path.join(img_dir, crop_name)
         cv2.imwrite(crop_path, crop)
 
@@ -163,7 +164,7 @@ def run_detection(img_bytes, conf_thresh=0.7, output_dataset="dataset"):
         bw = (x2 - x1) / w
         bh = (y2 - y1) / h
 
-        label_name = f"crop_{det['index']}.txt"
+        label_name = f"{base}_{det['index']}.txt"
         label_path = os.path.join(lbl_dir, label_name)
 
         with open(label_path, "w") as f:
@@ -183,7 +184,12 @@ def run_detection(img_bytes, conf_thresh=0.7, output_dataset="dataset"):
 # ---------------- STREAMLIT UI ----------------
 st.title("📦 YOLO Dataset Builder from Single Image")
 
-uploaded = st.file_uploader("Upload an image", type=["jpg","png","jpeg"])
+uploaded_files = st.file_uploader(
+    "Upload images",
+    type=["jpg", "png", "jpeg"],
+    accept_multiple_files=True
+)
+
 conf_thresh = st.slider("Confidence Threshold", 0.1, 0.95, 0.7)
 
 if uploaded:
