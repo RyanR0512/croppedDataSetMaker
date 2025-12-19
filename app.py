@@ -2,11 +2,11 @@ import streamlit as st
 import tensorflow as tf
 import cv2
 import numpy as np
-import zipfile
 import os
-import io
 import shutil
 import requests
+import time
+import pandas as pd
 
 # ---------------- COCO LABELS ----------------
 COCO_CLASSES = [
@@ -64,7 +64,7 @@ def non_max_suppression(dets, iou_threshold=0.5):
         idxs = np.where(classes == c)[0]
         sorted_idxs = idxs[np.argsort(-scores[idxs])]
 
-        while len(sorted_idxs) > 0:
+        while len(sorted_idxs):
             best = sorted_idxs[0]
             keep.append(best)
             if len(sorted_idxs) == 1:
@@ -74,26 +74,23 @@ def non_max_suppression(dets, iou_threshold=0.5):
 
     return [dets[i] for i in keep]
 
-# ---------------- DETECTION + DATASET EXPORT ----------------
+# ---------------- DETECTION ----------------
 def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="dataset"):
     download_model()
 
-    # Load image
     arr = np.frombuffer(img_bytes, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     img_resized = cv2.resize(img, (640, 640))
     h, w, _ = img_resized.shape
 
-    rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
-    inp = rgb.astype(np.float32) / 255.0
-    inp = np.expand_dims(inp, 0)
+    inp = np.expand_dims(
+        cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0,
+        0
+    )
 
     interpreter = tf.lite.Interpreter(MODEL_PATH)
     interpreter.allocate_tensors()
-
-    interpreter.set_tensor(
-        interpreter.get_input_details()[0]["index"], inp
-    )
+    interpreter.set_tensor(interpreter.get_input_details()[0]["index"], inp)
     interpreter.invoke()
 
     output = interpreter.get_tensor(
@@ -129,8 +126,8 @@ def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="datase
     os.makedirs(img_dir, exist_ok=True)
     os.makedirs(lbl_dir, exist_ok=True)
 
-    saved = []
     base = os.path.splitext(image_name)[0]
+    saved = []
 
     for det in detections:
         x1, y1, x2, y2 = det["bbox"]
@@ -149,7 +146,7 @@ def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="datase
         with open(os.path.join(lbl_dir, lbl_name), "w") as f:
             f.write(f"{det['class_id']} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n")
 
-        saved.append((img_name, lbl_name))
+        saved.append(det["class_id"])
 
     preview = img_resized.copy()
     for det in detections:
@@ -172,33 +169,39 @@ conf_thresh = st.slider("Confidence Threshold", 0.1, 0.95, 0.7)
 if uploaded_files and st.button("Run Detection & Build Dataset"):
     shutil.rmtree("dataset", ignore_errors=True)
 
+    progress = st.progress(0)
+    status = st.empty()
+    eta = st.empty()
+
+    class_counts = {i: 0 for i in range(len(COCO_CLASSES))}
     previews = []
-    all_saved = []
 
-    for file in uploaded_files:
-        preview, saved = run_detection(
-            file.read(),
-            file.name,
-            conf_thresh
-        )
+    total = len(uploaded_files)
+    start = time.time()
+
+    for i, file in enumerate(uploaded_files, start=1):
+        status.text(f"Processing {i}/{total}: {file.name}")
+
+        preview, classes = run_detection(file.read(), file.name, conf_thresh)
         previews.append((file.name, preview))
-        all_saved.extend(saved)
 
-    st.success(f"{len(all_saved)} objects saved to dataset")
+        for c in classes:
+            class_counts[c] += 1
 
-    st.subheader("Annotated Previews")
-    for name, img in previews:
-        st.markdown(f"**{name}**")
-        st.image(img, use_container_width=True)
+        elapsed = time.time() - start
+        avg = elapsed / i
+        remaining = avg * (total - i)
 
-    shutil.make_archive("dataset_export", "zip", "dataset")
+        progress.progress(i / total)
+        eta.text(f"Estimated time remaining: {remaining:.1f} seconds")
 
-    with open("dataset_export.zip", "rb") as f:
-        st.download_button(
-            "Download Dataset ZIP",
-            f,
-            file_name="dataset.zip",
-            mime="application/zip"
-        )
+    progress.progress(1.0)
+    status.text("Processing complete ✅")
+    eta.text("Estimated time remaining: 0 seconds")
 
-    st.info("YOLO format dataset: dataset/images + dataset/labels")
+    # -------- Class-wise table --------
+    st.subheader("📊 Class-wise Object Counts")
+
+    rows = [
+        {"Class": COCO_CLASSES[k], "Count": v}
+        for k, v
