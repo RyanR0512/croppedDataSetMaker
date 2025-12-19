@@ -204,6 +204,25 @@ if uploaded_files and st.button("Run Detection & Build Dataset"):
 
     rows = [
         {"Class": COCO_CLASSES[k], "Count": v}
-        for k, v in class_counts.items()
-        if v > 0 
+        for k, v in class_counts.items() if v > 0
     ]
+
+    df = pd.DataFrame(rows).sort_values("Count", ascending=False)
+    st.dataframe(df, use_container_width=True)
+
+    # -------- Previews --------
+    st.subheader("Annotated Previews")
+    for name, img in previews:
+        st.markdown(f"**{name}**")
+        st.image(img, use_container_width=True)
+
+    shutil.make_archive("dataset_export", "zip", "dataset")
+    with open("dataset_export.zip", "rb") as f:
+        st.download_button(
+            "Download Dataset ZIP",
+            f,
+            file_name="dataset.zip",
+            mime="application/zip"
+        )
+
+    st.success("Dataset exported in YOLO format")
