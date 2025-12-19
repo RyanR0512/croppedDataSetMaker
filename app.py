@@ -204,4 +204,6 @@ if uploaded_files and st.button("Run Detection & Build Dataset"):
 
     rows = [
         {"Class": COCO_CLASSES[k], "Count": v}
-        for k, v
+        for k, v in class_counts.items()
+        if v > 0 
+    ]
