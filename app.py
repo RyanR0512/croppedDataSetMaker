@@ -127,7 +127,7 @@ def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="datase
     os.makedirs(lbl_dir, exist_ok=True)
 
     base = os.path.splitext(image_name)[0]
-    saved = []
+    saved_classes = []
 
     for det in detections:
         x1, y1, x2, y2 = det["bbox"]
@@ -146,14 +146,14 @@ def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="datase
         with open(os.path.join(lbl_dir, lbl_name), "w") as f:
             f.write(f"{det['class_id']} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n")
 
-        saved.append(det["class_id"])
+        saved_classes.append(det["class_id"])
 
     preview = img_resized.copy()
     for det in detections:
         x1, y1, x2, y2 = det["bbox"]
         cv2.rectangle(preview, (x1, y1), (x2, y2), (0,255,0), 2)
 
-    return preview, saved
+    return preview, saved_classes
 
 # ---------------- STREAMLIT UI ----------------
 st.title("📦 YOLO Dataset Builder (Bulk Images)")
@@ -166,6 +166,11 @@ uploaded_files = st.file_uploader(
 
 conf_thresh = st.slider("Confidence Threshold", 0.1, 0.95, 0.7)
 
+show_previews = st.checkbox(
+    "Show annotated image previews (may slow down large batches)",
+    value=False
+)
+
 if uploaded_files and st.button("Run Detection & Build Dataset"):
     shutil.rmtree("dataset", ignore_errors=True)
 
@@ -174,7 +179,7 @@ if uploaded_files and st.button("Run Detection & Build Dataset"):
     eta = st.empty()
 
     class_counts = {i: 0 for i in range(len(COCO_CLASSES))}
-    previews = []
+    previews = [] if show_previews else None
 
     total = len(uploaded_files)
     start = time.time()
@@ -183,7 +188,9 @@ if uploaded_files and st.button("Run Detection & Build Dataset"):
         status.text(f"Processing {i}/{total}: {file.name}")
 
         preview, classes = run_detection(file.read(), file.name, conf_thresh)
-        previews.append((file.name, preview))
+
+        if show_previews:
+            previews.append((file.name, preview))
 
         for c in classes:
             class_counts[c] += 1
@@ -199,22 +206,19 @@ if uploaded_files and st.button("Run Detection & Build Dataset"):
     status.text("Processing complete ✅")
     eta.text("Estimated time remaining: 0 seconds")
 
-    # -------- Class-wise table --------
     st.subheader("📊 Class-wise Object Counts")
-
     rows = [
         {"Class": COCO_CLASSES[k], "Count": v}
         for k, v in class_counts.items() if v > 0
     ]
-
     df = pd.DataFrame(rows).sort_values("Count", ascending=False)
     st.dataframe(df, use_container_width=True)
 
-    # -------- Previews --------
-    st.subheader("Annotated Previews")
-    for name, img in previews:
-        st.markdown(f"**{name}**")
-        st.image(img, use_container_width=True)
+    if show_previews:
+        st.subheader("Annotated Previews")
+        for name, img in previews:
+            st.markdown(f"**{name}**")
+            st.image(img, use_container_width=True)
 
     shutil.make_archive("dataset_export", "zip", "dataset")
     with open("dataset_export.zip", "rb") as f:
