@@ -170,6 +170,7 @@ show_previews = st.checkbox(
     "Show annotated image previews (may slow down large batches)",
     value=False
 )
+st.write("Preview toggle is:", show_previews)
 
 if uploaded_files and st.button("Run Detection & Build Dataset"):
     shutil.rmtree("dataset", ignore_errors=True)
