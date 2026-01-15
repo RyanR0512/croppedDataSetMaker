@@ -33,10 +33,19 @@ MODEL_PATH = "yolov5m-fp16.tflite"
 # ---------------- DOWNLOAD MODEL ----------------
 def download_model():
     if not os.path.exists(MODEL_PATH):
-        r = requests.get(MODEL_URL, stream=True)
-        with open(MODEL_PATH, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
+        with st.spinner("Downloading model... (one-time setup)"):
+            r = requests.get(MODEL_URL, stream=True)
+            with open(MODEL_PATH, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+# ---------------- LOAD MODEL ONCE ----------------
+@st.cache_resource
+def load_model():
+    download_model()
+    interpreter = tf.lite.Interpreter(MODEL_PATH)
+    interpreter.allocate_tensors()
+    return interpreter
 
 # ---------------- NMS HELPERS ----------------
 def compute_iou(box1, boxes):
@@ -74,10 +83,8 @@ def non_max_suppression(dets, iou_threshold=0.5):
 
     return [dets[i] for i in keep]
 
-# ---------------- DETECTION ----------------
-def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="dataset"):
-    download_model()
-
+# ---------------- DETECTION (OPTIMIZED) ----------------
+def run_detection(img_bytes, image_name, interpreter, conf_thresh=0.7, img_dir="dataset/images", lbl_dir="dataset/labels"):
     arr = np.frombuffer(img_bytes, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     img_resized = cv2.resize(img, (640, 640))
@@ -88,8 +95,7 @@ def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="datase
         0
     )
 
-    interpreter = tf.lite.Interpreter(MODEL_PATH)
-    interpreter.allocate_tensors()
+    # Use pre-loaded interpreter
     interpreter.set_tensor(interpreter.get_input_details()[0]["index"], inp)
     interpreter.invoke()
 
@@ -121,14 +127,11 @@ def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="datase
 
     detections = non_max_suppression(detections)
 
-    img_dir = os.path.join(output_dataset, "images")
-    lbl_dir = os.path.join(output_dataset, "labels")
-    os.makedirs(img_dir, exist_ok=True)
-    os.makedirs(lbl_dir, exist_ok=True)
-
     base = os.path.splitext(image_name)[0]
     saved_classes = []
+    preview_path = None
 
+    # Batch file writes
     for det in detections:
         x1, y1, x2, y2 = det["bbox"]
         crop = img_resized[max(0,y1):y2, max(0,x1):x2]
@@ -148,15 +151,20 @@ def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="datase
 
         saved_classes.append(det["class_id"])
 
+    # Generate preview (save to disk instead of keeping in memory)
     preview = img_resized.copy()
     for det in detections:
         x1, y1, x2, y2 = det["bbox"]
         cv2.rectangle(preview, (x1, y1), (x2, y2), (0,255,0), 2)
+    
+    preview_path = os.path.join(img_dir, f"{base}_preview.jpg")
+    cv2.imwrite(preview_path, preview)
 
-    return preview, saved_classes
+    return preview_path, saved_classes
 
 # ---------------- STREAMLIT UI ----------------
 st.title("📦 YOLO Dataset Builder (Bulk Images)")
+st.markdown("**Optimized for large batches** - Model loads once, efficient file I/O")
 
 uploaded_files = st.file_uploader(
     "Upload images",
@@ -167,20 +175,28 @@ uploaded_files = st.file_uploader(
 conf_thresh = st.slider("Confidence Threshold", 0.1, 0.95, 0.7)
 
 show_previews = st.checkbox(
-    "Show annotated image previews (may slow down large batches)",
+    "Show annotated image previews (may slow down display for large batches)",
     value=False
 )
-st.write("Preview toggle is:", show_previews)
 
 if uploaded_files and st.button("Run Detection & Build Dataset"):
     shutil.rmtree("dataset", ignore_errors=True)
+    
+    # Create directories once
+    img_dir = os.path.join("dataset", "images")
+    lbl_dir = os.path.join("dataset", "labels")
+    os.makedirs(img_dir, exist_ok=True)
+    os.makedirs(lbl_dir, exist_ok=True)
+
+    # Load model ONCE (cached)
+    interpreter = load_model()
 
     progress = st.progress(0)
     status = st.empty()
     eta = st.empty()
 
     class_counts = {i: 0 for i in range(len(COCO_CLASSES))}
-    previews = [] if show_previews else None
+    preview_paths = [] if show_previews else None
 
     total = len(uploaded_files)
     start = time.time()
@@ -188,10 +204,21 @@ if uploaded_files and st.button("Run Detection & Build Dataset"):
     for i, file in enumerate(uploaded_files, start=1):
         status.text(f"Processing {i}/{total}: {file.name}")
 
-        preview, classes = run_detection(file.read(), file.name, conf_thresh)
+        # Read file bytes once
+        img_bytes = file.read()
+        
+        # Pass pre-loaded interpreter
+        preview_path, classes = run_detection(
+            img_bytes, 
+            file.name, 
+            interpreter, 
+            conf_thresh,
+            img_dir,
+            lbl_dir
+        )
 
         if show_previews:
-            previews.append((file.name, preview))
+            preview_paths.append((file.name, preview_path))
 
         for c in classes:
             class_counts[c] += 1
@@ -215,11 +242,13 @@ if uploaded_files and st.button("Run Detection & Build Dataset"):
     df = pd.DataFrame(rows).sort_values("Count", ascending=False)
     st.dataframe(df, use_container_width=True)
 
-    if show_previews:
+    if show_previews and preview_paths:
         st.subheader("Annotated Previews")
-        for name, img in previews:
+        for name, path in preview_paths:
             st.markdown(f"**{name}**")
-            st.image(img, use_container_width=True)
+            img = cv2.imread(path)
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            st.image(img_rgb, use_container_width=True)
 
     shutil.make_archive("dataset_export", "zip", "dataset")
     with open("dataset_export.zip", "rb") as f:
