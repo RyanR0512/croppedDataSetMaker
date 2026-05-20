@@ -156,7 +156,7 @@ def run_detection(img_bytes, image_name, conf_thresh=0.7, output_dataset="datase
     return preview, saved_classes
 
 # ---------------- STREAMLIT UI ----------------
-st.title("📦 YOLO Dataset Builder (Bulk Images)")
+st.title("Cropped Dataset Builder YOLO Format (Bulk Images)")
 
 uploaded_files = st.file_uploader(
     "Upload images",
