@@ -251,6 +251,11 @@ if uploaded_files and st.button("Run Detection & Build Dataset"):
         {"Class": COCO_CLASSES[k], "Count": v}
         for k, v in class_counts.items() if v > 0
     ]
+    if rows:
+        df = pd.DataFrame(rows).sort_values("Count", ascending=False)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No objects were detected. Try lowering the confidence threshold.")
     df = pd.DataFrame(rows).sort_values("Count", ascending=False)
     st.dataframe(df, use_container_width=True)
 
