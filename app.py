@@ -98,6 +98,10 @@ def run_detection(interpreter, img_bytes, image_name, conf_thresh=0.7, output_da
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     del arr  # free raw bytes buffer
 
+    if img is None:
+        st.warning(f"Skipping {image_name}: OpenCV could not read this image.")
+        return None, []
+        
     img_resized = cv2.resize(img, (640, 640))
     del img  # free original decoded image
     h, w, _ = img_resized.shape
@@ -214,7 +218,7 @@ if uploaded_files and st.button("Run Detection & Build Dataset"):
         status.text(f"Processing {i}/{total}: {file.name}")
 
         # Read bytes and immediately discard the file reference
-        img_bytes = file.read()
+        img_bytes = file.getvalue()
         preview, classes = run_detection(interpreter, img_bytes, file.name, conf_thresh)
         del img_bytes  # free upload bytes right away
 
